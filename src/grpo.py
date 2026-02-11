@@ -162,7 +162,6 @@ def main():
 
     # Rewards (smoke test): stub only
     reward_funcs = [DialectRewardStub()]
-    reward_weights = [float(cfg.get("rewards", {}).get("w_dialect", 0.0))]
 
     import inspect
     # Filter config keys to match the installed TRL version's GRPOConfig signature
