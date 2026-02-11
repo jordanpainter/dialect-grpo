@@ -186,7 +186,6 @@ def main():
         processing_class=tokenizer,
         peft_config=lora_cfg,
         reward_funcs=reward_funcs,
-        reward_weights=reward_weights,
     )
 
     trainer.train()
