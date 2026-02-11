@@ -161,7 +161,7 @@ def main():
     )
 
     # Rewards (smoke test): stub only
-    reward_funcs = [dialect_reward_stub()]
+    reward_funcs = [dialect_reward_stub]
 
     import inspect
     # Filter config keys to match the installed TRL version's GRPOConfig signature
