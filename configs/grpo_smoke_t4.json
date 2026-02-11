@@ -1,0 +1,72 @@
+{
+  "wandb": { "project": "test", "api_key": "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" },
+
+  "model": {
+    "model_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "tokenizer_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "load_in_4bit": true,
+    "bnb_4bit_compute_dtype": "bfloat16",
+    "bnb_4bit_quant_type": "nf4",
+    "bnb_4bit_use_double_quant": true
+  },
+
+  "peft": {
+    "r": 8,
+    "lora_alpha": 16,
+    "lora_dropout": 0.05,
+    "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"],
+    "bias": "none",
+    "task_type": "CAUSAL_LM"
+  },
+
+  "data": {
+    "dataset_id": "jordanpainter/dialect-preferences",
+    "dataset_split": "train",
+    "seed": 42,
+    "test_size": 0.02,
+    "smoke_subset_train": 128,
+    "smoke_subset_eval": 64,
+    "system_prompt": "You are a helpful assistant. Match the requested English dialect naturally."
+  },
+
+  "rewards": {
+    "w_comet": 1.0,
+    "w_dialect": 0.0,
+    "comet_checkpoint": "Unbabel/wmt22-comet-da",
+    "comet_device": "cpu",
+    "comet_batch_size": 4
+  },
+
+  "trainer": {
+    "output_dir": "outputs/grpo_smoke_t4",
+    "report_to": "none",
+
+    "max_steps": 30,
+    "learning_rate": 5e-5,
+    "warmup_ratio": 0.05,
+    "weight_decay": 0.0,
+
+    "bf16": true,
+    "fp16": false,
+    "gradient_checkpointing": true,
+
+    "per_device_train_batch_size": 1,
+    "gradient_accumulation_steps": 8,
+
+    "logging_steps": 1,
+    "save_steps": 50,
+    "eval_steps": 50,
+    "evaluation_strategy": "steps",
+    "save_strategy": "steps",
+
+    "max_prompt_length": 2048,
+    "max_completion_length": 128,
+
+    "num_generations": 1,
+    "temperature": 0.9,
+    "top_p": 0.95,
+
+    "beta": 0.0,
+    "scale_rewards": true
+  }
+}
