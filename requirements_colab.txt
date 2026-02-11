@@ -1,13 +1,21 @@
-datasets==2.18.0
-fsspec==2024.2.0
-huggingface_hub>=0.20.0
+# ---- Hard pins to match Colab + COMET constraints ----
+numpy==1.26.4
+protobuf>=5.29.1,<6
+fsspec==2025.3.0
+huggingface_hub==0.26.5
 
-transformers>=4.40.0
-accelerate>=0.28.0
-peft>=0.10.0
-trl>=0.15.0
+# ---- HF stack (keep Transformers < 5 for COMET) ----
+transformers==4.56.2
+datasets==2.21.0
+accelerate==0.33.0
 
-bitsandbytes>=0.43.0
+# ---- RL + PEFT ----
+trl==0.15.2
+peft==0.12.0
+bitsandbytes==0.43.3
 
-unbabel-comet>=2.2.0
+# ---- Reward model runtime ----
+unbabel-comet==2.2.7
+
+# ---- Optional logging ----
 wandb
