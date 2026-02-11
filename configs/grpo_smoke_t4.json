@@ -33,7 +33,7 @@
     "w_dialect": 0.0
   },
 
-  "trainer": {
+ "trainer": {
     "output_dir": "outputs/grpo_smoke_no_comet",
     "report_to": "none",
 
@@ -50,15 +50,10 @@
     "gradient_accumulation_steps": 4,
 
     "logging_steps": 1,
-    "save_steps": 1000,
-    "eval_steps": 1000,
-    "evaluation_strategy": "steps",
-    "save_strategy": "steps",
 
-    "max_prompt_length": 2048,
     "max_completion_length": 64,
 
-    "num_generations": 1,
+    "num_generations": 2,
     "temperature": 0.9,
     "top_p": 0.95,
 
