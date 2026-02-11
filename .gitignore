@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.ipynb_checkpoints/
+
+# Envs
+.venv/
+venv/
+env/
+
+# Outputs / checkpoints
+outputs/
+wandb/
+*.ckpt
+
+# OS/editor
+.DS_Store
+.vscode/
