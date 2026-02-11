@@ -12,7 +12,7 @@ from peft import LoraConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, set_seed
 from trl import GRPOConfig, GRPOTrainer
 
-from rewards import DialectRewardStub
+from rewards import dialect_reward_stub
 from src.formatting import build_chat_prompt
 
 
@@ -161,7 +161,7 @@ def main():
     )
 
     # Rewards (smoke test): stub only
-    reward_funcs = [DialectRewardStub()]
+    reward_funcs = [dialect_reward_stub()]
 
     import inspect
     # Filter config keys to match the installed TRL version's GRPOConfig signature

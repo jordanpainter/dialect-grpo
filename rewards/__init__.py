@@ -1,1 +1,1 @@
-from .dialect_reward import DialectRewardStub
+from .dialect_reward import dialect_reward_stub
