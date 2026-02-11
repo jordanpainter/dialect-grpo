@@ -164,7 +164,21 @@ def main():
     reward_funcs = [DialectRewardStub()]
     reward_weights = [float(cfg.get("rewards", {}).get("w_dialect", 0.0))]
 
-    grpo_args = GRPOConfig(**cfg["trainer"])
+    import inspect
+    # Filter config keys to match the installed TRL version's GRPOConfig signature
+    sig = inspect.signature(GRPOConfig.__init__)
+    allowed = set(sig.parameters.keys())
+    allowed.discard("self")
+
+    raw_args = cfg["trainer"]
+    filtered_args = {k: v for k, v in raw_args.items() if k in allowed}
+
+    dropped = sorted(set(raw_args.keys()) - set(filtered_args.keys()))
+    if dropped:
+        logger.warning("Dropping unsupported GRPOConfig args for this TRL version: %s", dropped)
+
+    grpo_args = GRPOConfig(**filtered_args)
+
     trainer = GRPOTrainer(
         model=model,
         args=grpo_args,
