@@ -1,26 +1,7 @@
-# --- Keep Colab happy enough, while satisfying COMET/TRL ---
-
-# COMET requires protobuf < 5
-protobuf==4.25.8
-
-# Keep numpy < 2 for COMET 2.2.7 (per your earlier error)
-numpy==1.26.4
-
-# datasets requires fsspec <= 2024.6.1
-fsspec==2024.6.1
-
-# transformers 4.56.2 requires huggingface-hub >= 0.34,<1.0
-huggingface_hub==0.35.0
-
-# HF stack
-transformers==4.56.2
-datasets==2.21.0
-accelerate==0.34.2
-
-# RL / PEFT
-trl==0.15.2
-peft==0.12.0
-bitsandbytes==0.43.3
-
-# Reward runtime
-unbabel-comet==2.2.7
+transformers>=4.40
+trl>=0.15.0
+accelerate>=0.28
+datasets>=2.18
+peft>=0.10
+bitsandbytes>=0.43.0
+huggingface_hub>=0.20.0

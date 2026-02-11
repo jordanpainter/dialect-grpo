@@ -9,10 +9,9 @@ import torch
 from datasets import load_dataset
 from peft import LoraConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, set_seed
-from transformers.trainer_utils import get_last_checkpoint
 from trl import GRPOConfig, GRPOTrainer
 
-from rewards import COMETReward, DialectRewardStub
+from rewards import DialectRewardStub
 from src.formatting import build_chat_prompt
 
 
@@ -23,17 +22,6 @@ def setup_logging():
         datefmt="%Y-%m-%d %H:%M:%S",
     )
     return logging.getLogger("grpo")
-
-
-def maybe_setup_wandb(cfg, logger) -> bool:
-    wb = cfg.get("wandb", {})
-    if not wb.get("project"):
-        return False
-    os.environ["WANDB_PROJECT"] = wb["project"]
-    if wb.get("api_key"):
-        import wandb
-        wandb.login(key=wb["api_key"])
-    return True
 
 
 def load_policy_and_tokenizer(cfg):
@@ -70,7 +58,6 @@ def load_policy_and_tokenizer(cfg):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--config", "-c", required=True)
-    p.add_argument("--resume", "-r", action="store_true")
     args = p.parse_args()
 
     logger = setup_logging()
@@ -78,45 +65,36 @@ def main():
     with open(args.config) as f:
         cfg = json.load(f)
 
-    # seeds
     seed = int(cfg["data"].get("seed", 42))
     set_seed(seed)
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    use_wandb = maybe_setup_wandb(cfg, logger)
-    if not use_wandb:
-        cfg["trainer"]["report_to"] = "none"
-
     model, tokenizer = load_policy_and_tokenizer(cfg)
 
-    # Load dataset from HF hub (your case)
     dcfg = cfg["data"]
     ds = load_dataset(dcfg["dataset_id"], split=dcfg.get("dataset_split", "train"))
 
-    # sanity columns
     for col in ["prompt", "chosen", "rejected"]:
         if col not in ds.column_names:
             raise ValueError(f"Dataset missing required column: {col}. Found: {ds.column_names}")
 
-    # split
     ds = ds.train_test_split(test_size=float(dcfg.get("test_size", 0.02)), seed=seed)
     train_ds, eval_ds = ds["train"], ds["test"]
 
-    # smoke subset (optional)
-    if "smoke_subset_train" in dcfg and dcfg["smoke_subset_train"]:
-        n = min(int(dcfg["smoke_subset_train"]), len(train_ds))
-        train_ds = train_ds.select(range(n))
-        logger.info("Using smoke subset train: %d rows", n)
-    if "smoke_subset_eval" in dcfg and dcfg["smoke_subset_eval"]:
-        n = min(int(dcfg["smoke_subset_eval"]), len(eval_ds))
-        eval_ds = eval_ds.select(range(n))
-        logger.info("Using smoke subset eval: %d rows", n)
+    # tiny subset
+    n_tr = int(dcfg.get("smoke_subset_train", 0) or 0)
+    n_ev = int(dcfg.get("smoke_subset_eval", 0) or 0)
+    if n_tr > 0:
+        train_ds = train_ds.select(range(min(n_tr, len(train_ds))))
+        logger.info("Smoke subset train: %d", len(train_ds))
+    if n_ev > 0:
+        eval_ds = eval_ds.select(range(min(n_ev, len(eval_ds))))
+        logger.info("Smoke subset eval: %d", len(eval_ds))
 
     system_prompt = dcfg.get("system_prompt", "")
 
-    # map: keep raw prompt for COMET, wrap prompt for policy generation
     def map_fn(ex):
         raw = ex["prompt"]
         ex["prompt_raw"] = raw
@@ -126,7 +104,6 @@ def main():
     train_ds = train_ds.map(map_fn)
     eval_ds = eval_ds.map(map_fn)
 
-    # LoRA
     pcfg = cfg["peft"]
     lora_cfg = LoraConfig(
         r=int(pcfg.get("r", 8)),
@@ -137,20 +114,10 @@ def main():
         task_type=str(pcfg.get("task_type", "CAUSAL_LM")),
     )
 
-    # Rewards (composable)
-    rcfg = cfg["rewards"]
-    reward_funcs = [
-        COMETReward(
-            checkpoint=rcfg.get("comet_checkpoint", "Unbabel/wmt22-comet-da"),
-            device=rcfg.get("comet_device", "cpu"),
-            batch_size=int(rcfg.get("comet_batch_size", 4)),
-            use_prompt_raw=True,
-        ),
-        DialectRewardStub(),
-    ]
-    reward_weights = [float(rcfg.get("w_comet", 1.0)), float(rcfg.get("w_dialect", 0.0))]
+    # Rewards: all zeros (just to exercise the GRPO loop)
+    reward_funcs = [DialectRewardStub()]
+    reward_weights = [float(cfg.get("rewards", {}).get("w_dialect", 0.0))]
 
-    # TRL GRPO: processing_class is the tokenizer in newer TRL. :contentReference[oaicite:3]{index=3}
     grpo_args = GRPOConfig(**cfg["trainer"])
     trainer = GRPOTrainer(
         model=model,
@@ -163,13 +130,7 @@ def main():
         reward_weights=reward_weights,
     )
 
-    ckpt = None
-    if args.resume:
-        ckpt = get_last_checkpoint(trainer.args.output_dir)
-        if ckpt:
-            logger.info("Resuming from checkpoint: %s", ckpt)
-
-    trainer.train(resume_from_checkpoint=ckpt)
+    trainer.train()
 
     out_dir = trainer.args.output_dir
     os.makedirs(out_dir, exist_ok=True)
