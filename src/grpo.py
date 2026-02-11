@@ -6,7 +6,8 @@ import random
 
 import numpy as np
 import torch
-from datasets import load_dataset
+from datasets import load_from_disk
+from huggingface_hub import snapshot_download, login as hf_login
 from peft import LoraConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, set_seed
 from trl import GRPOConfig, GRPOTrainer
@@ -55,6 +56,34 @@ def load_policy_and_tokenizer(cfg):
     return model, tokenizer
 
 
+def load_dataset_from_hub_snapshot(dataset_id: str, split: str, logger: logging.Logger):
+    """
+    Dataset is stored on HF Hub as a `save_to_disk()` snapshot.
+    We snapshot_download the repo and then load_from_disk.
+    """
+    local_path = snapshot_download(dataset_id, repo_type="dataset")
+    logger.info("Downloaded dataset snapshot to: %s", local_path)
+
+    ds_any = load_from_disk(local_path)
+
+    # ds_any can be Dataset or DatasetDict
+    if hasattr(ds_any, "column_names"):
+        ds = ds_any
+        logger.info("Loaded dataset (Dataset) with columns: %s", ds.column_names)
+        return ds
+
+    # DatasetDict
+    if split in ds_any:
+        ds = ds_any[split]
+    else:
+        first_split = list(ds_any.keys())[0]
+        logger.warning("Requested split '%s' not found. Using first split '%s'.", split, first_split)
+        ds = ds_any[first_split]
+
+    logger.info("Loaded dataset split '%s' with columns: %s", split, ds.column_names)
+    return ds
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--config", "-c", required=True)
@@ -65,6 +94,13 @@ def main():
     with open(args.config) as f:
         cfg = json.load(f)
 
+    # Optional HF token login (helps with rate limits)
+    hf_token = cfg.get("hf_token") or os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN")
+    if hf_token:
+        hf_login(token=hf_token)
+        logger.info("Logged into Hugging Face Hub via token")
+
+    # Seeds
     seed = int(cfg["data"].get("seed", 42))
     set_seed(seed)
     random.seed(seed)
@@ -74,27 +110,36 @@ def main():
     model, tokenizer = load_policy_and_tokenizer(cfg)
 
     dcfg = cfg["data"]
-    ds = load_dataset(dcfg["dataset_id"], split=dcfg.get("dataset_split", "train"))
+    ds = load_dataset_from_hub_snapshot(
+        dataset_id=dcfg["dataset_id"],
+        split=dcfg.get("dataset_split", "train"),
+        logger=logger,
+    )
 
-    for col in ["prompt", "chosen", "rejected"]:
+    # Validate columns
+    required = ["prompt", "chosen", "rejected"]
+    for col in required:
         if col not in ds.column_names:
             raise ValueError(f"Dataset missing required column: {col}. Found: {ds.column_names}")
 
+    # Split
     ds = ds.train_test_split(test_size=float(dcfg.get("test_size", 0.02)), seed=seed)
     train_ds, eval_ds = ds["train"], ds["test"]
+    logger.info("Train/Eval sizes: %d / %d", len(train_ds), len(eval_ds))
 
-    # tiny subset
+    # Smoke subset (optional)
     n_tr = int(dcfg.get("smoke_subset_train", 0) or 0)
     n_ev = int(dcfg.get("smoke_subset_eval", 0) or 0)
     if n_tr > 0:
         train_ds = train_ds.select(range(min(n_tr, len(train_ds))))
-        logger.info("Smoke subset train: %d", len(train_ds))
+        logger.info("Smoke subset train: %d rows", len(train_ds))
     if n_ev > 0:
         eval_ds = eval_ds.select(range(min(n_ev, len(eval_ds))))
-        logger.info("Smoke subset eval: %d", len(eval_ds))
+        logger.info("Smoke subset eval: %d rows", len(eval_ds))
 
     system_prompt = dcfg.get("system_prompt", "")
 
+    # Wrap prompt for the policy; keep prompt_raw for future reward models (COMET)
     def map_fn(ex):
         raw = ex["prompt"]
         ex["prompt_raw"] = raw
@@ -104,6 +149,7 @@ def main():
     train_ds = train_ds.map(map_fn)
     eval_ds = eval_ds.map(map_fn)
 
+    # LoRA
     pcfg = cfg["peft"]
     lora_cfg = LoraConfig(
         r=int(pcfg.get("r", 8)),
@@ -114,7 +160,7 @@ def main():
         task_type=str(pcfg.get("task_type", "CAUSAL_LM")),
     )
 
-    # Rewards: all zeros (just to exercise the GRPO loop)
+    # Rewards (smoke test): stub only
     reward_funcs = [DialectRewardStub()]
     reward_weights = [float(cfg.get("rewards", {}).get("w_dialect", 0.0))]
 
