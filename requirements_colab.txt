@@ -1,8 +1,13 @@
-transformers>=4.40
+datasets==2.18.0
+fsspec==2024.2.0
+huggingface_hub>=0.20.0
+
+transformers>=4.40.0
+accelerate>=0.28.0
+peft>=0.10.0
 trl>=0.15.0
-accelerate>=0.28
-datasets>=2.18
-peft>=0.10
+
 bitsandbytes>=0.43.0
+
 unbabel-comet>=2.2.0
 wandb
