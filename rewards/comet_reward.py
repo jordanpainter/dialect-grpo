@@ -1,43 +1,87 @@
-from typing import List
+# rewards/comet_reward.py
+import os
+from typing import List, Optional
+
 import torch
+
+# COMET package: pip install unbabel-comet
 from comet import download_model, load_from_checkpoint
 
-class COMETReward:
+# ---- singleton cache (so each process loads once) ----
+_COMET_MODEL = None
+_COMET_NAME = None
+
+
+def _get_local_rank() -> int:
+    # works for torchrun/accelerate/DDP
+    return int(os.environ.get("LOCAL_RANK", os.environ.get("RANK", "0")))
+
+
+def _pick_device() -> torch.device:
+    if torch.cuda.is_available():
+        # In DDP each process is pinned to one GPU
+        lr = _get_local_rank()
+        return torch.device(f"cuda:{lr}")
+    return torch.device("cpu")
+
+
+def _load_comet(model_name: str, device: Optional[torch.device] = None):
+    global _COMET_MODEL, _COMET_NAME
+
+    if _COMET_MODEL is not None and _COMET_NAME == model_name:
+        return _COMET_MODEL
+
+    device = torch.device("cuda:1")
+
+    # downloads to HF cache, returns checkpoint path
+    ckpt_path = download_model(model_name)
+    model = load_from_checkpoint(ckpt_path)
+
+    # Make sure it's on the right device
+    model.to(device)
+    model.eval()
+
+    _COMET_MODEL = model
+    _COMET_NAME = model_name
+    return model
+
+
+@torch.inference_mode()
+def cometkiwi_reward(
+    prompts: List[str],
+    completions: List[str],
+    *,
+    # TRL will pass extra columns via kwargs; we’ll try to use prompt_raw if present.
+    prompt_raw: Optional[List[str]] = None,
+    model_name: str = "Unbabel/wmt22-cometkiwi-da",
+    batch_size: int = 16,
+    gpus: Optional[int] = None,
+    **kwargs,
+) -> List[float]:
     """
-    reward = COMET(src, mt, ref=chosen) - COMET(src, mt, ref=rejected)
+    Reference-free QE reward using COMETKiwi.
+    Uses src=prompt_raw (preferred) else src=prompts, and mt=completions.
 
-    TRL passes prompts, completions, and any extra dataset columns via **kwargs.
+    Returns: list[float] length == len(completions)
     """
-    def __init__(self, checkpoint: str, device: str = "cpu", batch_size: int = 8, use_prompt_raw: bool = True):
-        self.device = device
-        self.batch_size = batch_size
-        self.use_prompt_raw = use_prompt_raw
 
-        ckpt_path = download_model(checkpoint)
-        self.model = load_from_checkpoint(ckpt_path)
-        self.model.eval()
-        self.model.to(device)
+    if prompt_raw is None:
+        # fallback: prompts are your *chat-formatted* prompts, which is worse as "src"
+        srcs = prompts
+    else:
+        srcs = prompt_raw
 
-    @torch.inference_mode()
-    def __call__(
-        self,
-        prompts: List[str],
-        completions: List[str],
-        chosen: List[str],
-        rejected: List[str],
-        **kwargs,
-    ) -> List[float]:
-        srcs = kwargs.get("prompt_raw", prompts) if self.use_prompt_raw else prompts
+    model = _load_comet(model_name)
 
-        pos_data = [{"src": s, "mt": y, "ref": c} for s, y, c in zip(srcs, completions, chosen)]
-        neg_data = [{"src": s, "mt": y, "ref": r} for s, y, r in zip(srcs, completions, rejected)]
+    data = [{"src": s, "mt": m} for s, m in zip(srcs, completions)]
 
-        gpus = 1 if self.device.startswith("cuda") else 0
+    # In DDP each rank has its own GPU; so by default gpus=1 is fine.
+    # If you're running on CPU, set gpus=0.
+    if gpus is None:
+        gpus = 1 if torch.cuda.is_available() else 0
 
-        # COMET predict returns an object with `.scores` (list of floats). :contentReference[oaicite:2]{index=2}
-        pos_out = self.model.predict(pos_data, batch_size=self.batch_size, gpus=gpus)
-        neg_out = self.model.predict(neg_data, batch_size=self.batch_size, gpus=gpus)
+    out = model.predict(data, batch_size=batch_size, gpus=gpus)
+    scores = out["scores"]  # list[float], typically 0..1 for Kiwi models
 
-        pos_scores = list(pos_out.scores)
-        neg_scores = list(neg_out.scores)
-        return [float(a) - float(b) for a, b in zip(pos_scores, neg_scores)]
+    # Ensure plain Python floats
+    return [float(s) for s in scores]

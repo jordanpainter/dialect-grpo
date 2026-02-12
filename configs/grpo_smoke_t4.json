@@ -1,5 +1,5 @@
 {
-  "wandb": { "project": "test", "api_key": "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" },
+  "wandb": { "project": "test", "api_key": "" },
 
   "model": {
     "model_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
