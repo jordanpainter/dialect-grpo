@@ -1,4 +1,32 @@
-from typing import List
+# rewards/dialect_reward.py
+from __future__ import annotations
 
-def dialect_reward_stub(completions: List[str], **kwargs) -> List[float]:
-    return [0.0 for _ in completions]
+import os
+from typing import List, Optional
+
+import torch
+
+from .dialect_reward_model import RewardModel
+
+# Lazy singleton so we only load weights once per process
+_RM: Optional[RewardModel] = None
+
+def _get_rm() -> RewardModel:
+    global _RM
+    if _RM is None:
+        model_path = os.environ.get("DIALECT_REWARD_MODEL", "srirag/featue-identifier")
+        device = os.environ.get("DIALECT_REWARD_DEVICE", None)  # e.g. "cuda" or "cpu"
+        _RM = RewardModel(model_path=model_path, device=device)
+    return _RM
+
+
+def dialect_reward(prompts: List[str], completions: List[str], **kwargs) -> List[float]:
+    """
+    GRPO reward function: takes prompts + completions, returns a scalar reward per completion.
+    Uses the dialect feature identifier model.
+    """
+    rm = _get_rm()
+
+    # The reward model expects a list of texts; we only score completions here
+    rewards_t = rm.reward(completions)  # returns a torch.Tensor on CPU
+    return [float(x) for x in rewards_t]

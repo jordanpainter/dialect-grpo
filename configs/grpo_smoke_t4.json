@@ -37,7 +37,7 @@
     "output_dir": "outputs/grpo_smoke_no_comet",
     "report_to": "none",
 
-    "max_steps": 20,
+    "max_steps": 1000,
     "learning_rate": 5e-5,
     "warmup_ratio": 0.05,
     "weight_decay": 0.0,

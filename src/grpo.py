@@ -19,7 +19,7 @@ from transformers import (
 from trl import GRPOConfig, GRPOTrainer
 
 # keep your reward
-from rewards import cometkiwi_reward, embedding_margin_reward, dialect_reward_stub
+from rewards import cometkiwi_reward, embedding_margin_reward, dialect_reward
 
 
 # keep your formatter as fallback
@@ -267,8 +267,24 @@ def main():
             return reward_fn(prompts, trimmed, **kwargs)
         _wrapped.__name__ = getattr(reward_fn, "__name__", "reward_fn")
         return _wrapped
+    
+    def comet_only(prompts, completions, **kw):
+        return cometkiwi_reward(
+            prompts,
+            completions,
+            prompt_raw=kw.get("prompt_raw"),
+            model_name="Unbabel/wmt22-cometkiwi-da",
+            batch_size=8,
+            force_cpu=True,
+    )
 
-    reward_funcs = [trim_wrapper(embedding_margin_reward)]
+    def dialect_only(prompts, completions, **kw):
+        return dialect_reward(prompts, completions)
+
+    reward_funcs = [
+        trim_wrapper(comet_only),
+        trim_wrapper(dialect_only),
+    ]
 
 
     # Build GRPOConfig safely across TRL versions
