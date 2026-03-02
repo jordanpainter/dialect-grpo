@@ -44,3 +44,25 @@ def embedding_margin_reward(
 
     rewards = (sim_c - sim_r).detach().cpu().tolist()
     return [float(x) for x in rewards]
+
+def embedding_similarity_reward(
+    completions=None,
+    chosen=None,
+    **kwargs,
+):
+    """
+    Reward = cos(emb(completion), emb(chosen))
+    """
+    assert completions is not None
+    assert chosen is not None
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model_name = kwargs.get("sim_model_name", "sentence-transformers/all-MiniLM-L6-v2")
+    st = _get_model(model_name, device=device)
+
+    emb_y = st.encode(completions, convert_to_tensor=True, normalize_embeddings=True)
+    emb_c = st.encode(chosen, convert_to_tensor=True, normalize_embeddings=True)
+
+    sim = (emb_y * emb_c).sum(dim=1)  # cosine since normalized
+    rewards = sim.detach().cpu().tolist()
+    return [float(x) for x in rewards]

@@ -2,8 +2,8 @@
   "wandb": { "project": "test", "api_key": "" },
 
   "model": {
-    "model_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
-    "tokenizer_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "model_id": "jordanpainter/gemma3-sft-dialect",
+    "tokenizer_id": "jordanpainter/gemma3-sft-dialect",
     "load_in_4bit": true,
     "bnb_4bit_compute_dtype": "bfloat16",
     "bnb_4bit_quant_type": "nf4",
@@ -14,7 +14,10 @@
     "r": 8,
     "lora_alpha": 16,
     "lora_dropout": 0.05,
-    "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"],
+    "target_modules": [
+      "q_proj", "k_proj", "v_proj", "o_proj",
+      "gate_proj", "up_proj", "down_proj"
+    ],
     "bias": "none",
     "task_type": "CAUSAL_LM"
   },
@@ -26,20 +29,17 @@
     "test_size": 0.02,
     "smoke_subset_train": 64,
     "smoke_subset_eval": 32,
-    "system_prompt": "You are a helpful assistant. Match the requested English dialect naturally."
+    "system_prompt": "You are a helpful assistant."
   },
 
   "rewards": {
   "w_dialect": 0.50,
   "w_comet": 0.25,
-  "w_cosine": 0.25,
-  "comet_model_name": "Unbabel/wmt22-comet-da",
-  "comet_force_cpu": true,
-  "sim_model_name": "sentence-transformers/all-MiniLM-L6-v2"
+  "w_cosine": 0.25
   },
 
- "trainer": {
-    "output_dir": "outputs/grpo_smoke_no_comet",
+  "trainer": {
+    "output_dir": "outputs/grpo_smoke_gemma3_sft_dialect",
     "report_to": "none",
 
     "max_steps": 1000,
@@ -65,4 +65,5 @@
     "beta": 0.0,
     "scale_rewards": false
   }
+  
 }

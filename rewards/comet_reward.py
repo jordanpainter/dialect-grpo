@@ -95,3 +95,30 @@ def cometkiwi_reward(
     out = model.predict(data, batch_size=batch_size, gpus=0)
     scores = out["scores"]
     return [float(s) for s in scores]
+
+@torch.inference_mode()
+def comet_reward_with_ref(
+    prompts: List[str],
+    completions: List[str],
+    *,
+    chosen: List[str],
+    prompt_raw: Optional[List[str]] = None,
+    model_name: str = "Unbabel/wmt22-comet-da",
+    batch_size: int = 8,
+    force_cpu: bool = True,
+    **kwargs,
+) -> List[float]:
+    """
+    Reference-based COMET: uses src + mt + ref
+    Here ref = chosen completion, mt = generated completion.
+    """
+    assert chosen is not None
+    srcs = prompt_raw if prompt_raw is not None else prompts
+    device = _pick_device(force_cpu=force_cpu)
+
+    model = _load_comet(model_name, device=device)
+    data = [{"src": s, "mt": m, "ref": r} for s, m, r in zip(srcs, completions, chosen)]
+
+    out = model.predict(data, batch_size=batch_size, gpus=0)
+    scores = out["scores"]
+    return [float(s) for s in scores]

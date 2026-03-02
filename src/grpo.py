@@ -19,7 +19,9 @@ from transformers import (
 from trl import GRPOConfig, GRPOTrainer
 
 # keep your reward
-from rewards import cometkiwi_reward, embedding_margin_reward, dialect_reward
+from rewards.comet_reward import comet_reward_with_ref
+from rewards.sim_reward import embedding_similarity_reward
+from rewards.dialect_reward import dialect_reward
 
 
 # keep your formatter as fallback
@@ -268,24 +270,47 @@ def main():
         _wrapped.__name__ = getattr(reward_fn, "__name__", "reward_fn")
         return _wrapped
     
-    def comet_only(prompts, completions, **kw):
-        return cometkiwi_reward(
+    # --- weights (example: 50% dialect, 25% comet, 25% cosine) ---
+    wcfg = cfg.get("rewards", {})
+    W_DIALECT = float(wcfg.get("w_dialect", 0.50))
+    W_COMET   = float(wcfg.get("w_comet",   0.25))
+    W_COSINE  = float(wcfg.get("w_cosine",  0.25))
+
+    def comet_chosen_weighted(prompts, completions, **kw):
+        chosen = kw.get("chosen")
+        if chosen is None:
+            raise ValueError("Expected 'chosen' in kwargs for COMET reward.")
+        scores = comet_reward_with_ref(
             prompts,
             completions,
+            chosen=chosen,
             prompt_raw=kw.get("prompt_raw"),
-            model_name="Unbabel/wmt22-cometkiwi-da",
-            batch_size=8,
-            force_cpu=True,
-    )
+            model_name=wcfg.get("comet_model_name", "Unbabel/wmt22-comet-da"),
+            batch_size=int(wcfg.get("comet_batch_size", 8)),
+            force_cpu=bool(wcfg.get("comet_force_cpu", True)),
+        )
+        return [W_COMET * float(s) for s in scores]
 
-    def dialect_only(prompts, completions, **kw):
-        return dialect_reward(prompts, completions)
+    def cosine_chosen_weighted(prompts, completions, **kw):
+        chosen = kw.get("chosen")
+        if chosen is None:
+            raise ValueError("Expected 'chosen' in kwargs for cosine reward.")
+        scores = embedding_similarity_reward(
+            completions=completions,
+            chosen=chosen,
+            sim_model_name=wcfg.get("sim_model_name", "sentence-transformers/all-MiniLM-L6-v2"),
+        )
+        return [W_COSINE * float(s) for s in scores]
+
+    def dialect_generated_weighted(prompts, completions, **kw):
+        scores = dialect_reward(prompts, completions)
+        return [W_DIALECT * float(s) for s in scores]
 
     reward_funcs = [
-        trim_wrapper(comet_only),
-        trim_wrapper(dialect_only),
+        trim_wrapper(comet_chosen_weighted),
+        trim_wrapper(cosine_chosen_weighted),
+        trim_wrapper(dialect_generated_weighted),
     ]
-
 
     # Build GRPOConfig safely across TRL versions
     import inspect

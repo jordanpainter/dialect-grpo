@@ -14,7 +14,7 @@ _RM: Optional[RewardModel] = None
 def _get_rm() -> RewardModel:
     global _RM
     if _RM is None:
-        model_path = os.environ.get("DIALECT_REWARD_MODEL", "srirag/featue-identifier")
+        model_path = os.environ.get("DIALECT_REWARD_MODEL", "srirag/feature-identifier")
         device = os.environ.get("DIALECT_REWARD_DEVICE", None)  # e.g. "cuda" or "cpu"
         _RM = RewardModel(model_path=model_path, device=device)
     return _RM
