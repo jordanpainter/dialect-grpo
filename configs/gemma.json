@@ -2,15 +2,16 @@
   "wandb": { "project": "test", "api_key": "" },
 
   "model": {
-    "model_id": "jordanpainter/gemma3-sft-dialect",
-    "tokenizer_id": "jordanpainter/gemma3-sft-dialect",
-    "load_in_4bit": true,
+    "model_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "tokenizer_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "load_in_4bit": false,
     "bnb_4bit_compute_dtype": "bfloat16",
     "bnb_4bit_quant_type": "nf4",
     "bnb_4bit_use_double_quant": true
   },
 
   "peft": {
+    "enabled": false,
     "r": 8,
     "lora_alpha": 16,
     "lora_dropout": 0.05,
@@ -33,37 +34,57 @@
   },
 
   "rewards": {
-  "w_dialect": 0.50,
-  "w_comet": 0.25,
-  "w_cosine": 0.25
+  "weights": {
+    "dialect": 0.50,
+    "comet": 0.25,
+    "cosine": 0.25
+  },
+
+  "normalization": {
+    "method": "batch_zscore", 
+    "clip_z": 5.0,
+    "eps": 1e-6,
+    "beta": 0.99,
+    "warmup_steps": 50
+  },
+
+  "comet_model_name": "Unbabel/wmt22-comet-da",
+  "comet_batch_size": 8,
+  "comet_force_cpu": true,
+
+  "sim_model_name": "sentence-transformers/all-MiniLM-L6-v2"
   },
 
   "trainer": {
-    "output_dir": "outputs/grpo_smoke_gemma3_sft_dialect",
-    "report_to": "none",
+  "output_dir": "outputs/grpo_smoke_gemma3_sft_dialect",
+  "report_to": "none",
 
-    "max_steps": 1000,
-    "learning_rate": 5e-5,
-    "warmup_ratio": 0.05,
-    "weight_decay": 0.0,
+  "max_steps": 1000,
+  "learning_rate": 2e-5,
+  "warmup_ratio": 0.05,
+  "weight_decay": 0.0,
 
-    "bf16": true,
-    "fp16": false,
-    "gradient_checkpointing": true,
+  "bf16": true,
+  "fp16": false,
+  "gradient_checkpointing": true,
 
-    "per_device_train_batch_size": 1,
-    "gradient_accumulation_steps": 4,
+  "per_device_train_batch_size": 1,
+  "gradient_accumulation_steps": 4,
 
-    "logging_steps": 1,
+  "logging_steps": 1,
 
-    "max_completion_length": 64,
+  "max_completion_length": 192,
 
-    "num_generations": 2,
-    "temperature": 0.9,
-    "top_p": 0.95,
+  "num_generations": 2,
+  "temperature": 0.7,
+  "top_p": 0.95,
 
-    "beta": 0.0,
-    "scale_rewards": false
-  }
+  "generation_kwargs": {
+    "do_sample": true
+  },
+
+  "beta": 0.0,
+  "scale_rewards": false
+}
   
 }

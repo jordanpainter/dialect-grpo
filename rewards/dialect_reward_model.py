@@ -18,7 +18,7 @@ class RewardModel:
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
         length_penalty_alpha: float = 0.0,
     ):
-        self.device = device
+        self.device = torch.device(device) if device is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # load tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
