@@ -14,6 +14,7 @@ Key features:
   then normalizes each component (batch z-score or running z-score) and combines with weights.
 - Adds practical “stop token id list” support so generations can terminate properly.
 - Trims completions by stop-strings *for reward scoring* to avoid scoring “continued chat” tails.
+- **Hard prompt length guard** so prompt_tokens + max_new_tokens never exceeds model context (e.g., 2048).
 
 Run:
   accelerate launch --num_processes=1 -m src.grpo -c configs/gemma.json
@@ -63,7 +64,7 @@ def setup_logging() -> logging.Logger:
 
 def get_local_rank() -> int:
     """Accelerate sets LOCAL_RANK for each process."""
-    return int(os.environ.get("LOCAL_RANK", "0"))
+    return int(os.environ.get("LOCAL_RANK", os.environ.get("RANK", "0")))
 
 
 def ensure_pad_token(tokenizer) -> None:
@@ -89,6 +90,41 @@ def hard_trim_completion(text: str, stop_strings: Sequence[str]) -> str:
             cut = idx if cut is None else min(cut, idx)
 
     return text[:cut].rstrip() if cut is not None else text
+
+
+def resolve_model_max_length(tokenizer, model, fallback: int = 2048) -> int:
+    """
+    tokenizer.model_max_length is sometimes an absurd sentinel (e.g., 1e30).
+    Prefer model.config.max_position_embeddings when available.
+    """
+    tmax = getattr(tokenizer, "model_max_length", None)
+    if isinstance(tmax, int) and 64 < tmax < 100_000:
+        return int(tmax)
+
+    mmax = getattr(getattr(model, "config", None), "max_position_embeddings", None)
+    if isinstance(mmax, int) and 64 < mmax < 100_000:
+        return int(mmax)
+
+    return int(fallback)
+
+
+def truncate_prompt_to_max_tokens(tokenizer, text: str, max_tokens: int) -> str:
+    """
+    Left-truncate *by tokens* so the final prompt fits in max_tokens.
+    TRL will re-tokenize the stored string; making the string safe is robust across TRL versions.
+    """
+    if not text:
+        return text
+
+    enc = tokenizer(
+    text,
+    add_special_tokens=False,
+    return_attention_mask=False,
+    truncation=True,
+    max_length=max_tokens,
+    )
+    ids = enc["input_ids"]
+    return tokenizer.decode(ids, skip_special_tokens=False, clean_up_tokenization_spaces=False)
 
 
 class RunningZScore:
@@ -143,10 +179,9 @@ def load_policy_and_tokenizer(cfg: Dict[str, Any], logger: logging.Logger) -> Tu
     """
     Load the policy model + tokenizer.
 
-    Important notes for accelerate/DDP:
-    - Avoid device_map="auto".
-    - If quantized (4bit), pin the model to local_rank device using device_map={"": local_rank}.
-    - Do NOT pass torch_dtype=None; only pass torch_dtype when it’s set.
+    Notes:
+    - Avoid device_map="auto" under accelerate/DDP.
+    - If quantized (4bit), pin model to local_rank using device_map={"": local_rank}.
     """
     mcfg = cfg["model"]
     model_id = mcfg["model_id"]
@@ -166,26 +201,19 @@ def load_policy_and_tokenizer(cfg: Dict[str, Any], logger: logging.Logger) -> Tu
     device_map = {"": local_rank}
     logger.info("LOCAL_RANK=%s | device_map=%s", local_rank, device_map)
 
-    # dtype (only include if not None)
+    # dtype (only include if enabled)
     dtype = torch.bfloat16 if cfg.get("trainer", {}).get("bf16", False) else None
 
     from_pretrained_kwargs: Dict[str, Any] = dict(
         low_cpu_mem_usage=True,
-        quantization_config=quant_cfg,
+        quantization_config=quant_cfg,   # can be None
         device_map=device_map,
         return_dict=True,
     )
     if dtype is not None:
         from_pretrained_kwargs["torch_dtype"] = dtype
 
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id,
-        torch_dtype=torch.bfloat16 if cfg["trainer"].get("bf16", False) else None,
-        low_cpu_mem_usage=True,
-        quantization_config=quant_cfg,   # can be None
-        device_map=device_map,
-        return_dict=True,
-    )
+    model = AutoModelForCausalLM.from_pretrained(model_id, **from_pretrained_kwargs)
 
     # Make sure generation sees correct special tokens
     model.config.eos_token_id = tokenizer.eos_token_id
@@ -338,7 +366,7 @@ def make_combined_reward(cfg: Dict[str, Any], logger: logging.Logger):
         return x
 
     def combined_reward(prompts, completions, **kw):
-        # TRL passes dataset columns via kwargs (confirmed by your logs).
+        # TRL passes dataset columns via kwargs
         chosen = kw.get("chosen")
         if chosen is None:
             raise ValueError("Expected 'chosen' in kwargs for COMET/cosine rewards.")
@@ -504,6 +532,11 @@ def main() -> None:
         eval_ds = eval_ds.select(range(min(n_ev, len(eval_ds))))
         logger.info("Smoke subset eval: %d rows", len(eval_ds))
 
+    # ---- Generation stopping token ids ----
+    eos_ids = infer_stop_token_ids(tokenizer)
+    logger.info("tokenizer.pad_token_id=%s eos_token_id=%s eos_ids=%s",
+                tokenizer.pad_token_id, tokenizer.eos_token_id, eos_ids)
+
     # ---- Prompt formatting ----
     system_prompt = dcfg.get("system_prompt", "") or ""
 
@@ -517,30 +550,50 @@ def main() -> None:
         "\n<|assistant|>",
     ]
 
+    # ---- HARD LENGTH GUARD: prompt_tokens + max_new_tokens <= model_max ----
+    model_max_len = resolve_model_max_length(tokenizer, model, fallback=2048)
+    max_completion_len = int(cfg.get("trainer", {}).get("max_completion_length", 64))
+    safety_margin = int(cfg.get("trainer", {}).get("length_safety_margin", 8))
+
+    max_prompt_len = model_max_len - max_completion_len - safety_margin
+    max_prompt_len = max(32, int(max_prompt_len))
+
+    logger.info(
+        "Length guard: model_max_len=%d, max_completion_len=%d, safety_margin=%d => max_prompt_len=%d",
+        model_max_len, max_completion_len, safety_margin, max_prompt_len
+    )
+
+    # This helps any tokenizer(..., truncation=True) calls behave sanely too
+    tokenizer.model_max_length = max_prompt_len
+    cfg.setdefault("trainer", {})["max_prompt_length"] = max_prompt_len  # for future use / logging
+
     def map_fn(ex: Dict[str, Any]) -> Dict[str, Any]:
         raw = ex["prompt"]
         ex["prompt_raw"] = raw
-        ex["prompt"] = build_prompt(tokenizer, system_prompt, raw, prefer_chat_template=True)
+
+        built = build_prompt(tokenizer, system_prompt, raw, prefer_chat_template=True)
+        built = truncate_prompt_to_max_tokens(tokenizer, built, max_prompt_len)
+
+        ex["prompt"] = built
         return ex
 
     train_ds = train_ds.map(map_fn)
     eval_ds = eval_ds.map(map_fn)
 
     # ---- LoRA config ----
-    pcfg = cfg.get("peft", {})
-    lora_cfg = LoraConfig(
-        r=int(pcfg.get("r", 8)),
-        lora_alpha=int(pcfg.get("lora_alpha", 16)),
-        lora_dropout=float(pcfg.get("lora_dropout", 0.05)),
-        target_modules=list(pcfg.get("target_modules", ["q_proj", "k_proj", "v_proj", "o_proj"])),
-        bias=str(pcfg.get("bias", "none")),
-        task_type=str(pcfg.get("task_type", "CAUSAL_LM")),
-    )
+    peft_cfg = cfg.get("peft", {})
+    use_peft = bool(peft_cfg.get("enabled", True))
 
-    # ---- Generation stopping token ids ----
-    eos_ids = infer_stop_token_ids(tokenizer)
-    logger.info("tokenizer.pad_token_id=%s eos_token_id=%s eos_ids=%s",
-                tokenizer.pad_token_id, tokenizer.eos_token_id, eos_ids)
+    lora_cfg = None
+    if use_peft:
+        lora_cfg = LoraConfig(
+            r=int(peft_cfg.get("r", 8)),
+            lora_alpha=int(peft_cfg.get("lora_alpha", 16)),
+            lora_dropout=float(peft_cfg.get("lora_dropout", 0.05)),
+            target_modules=list(peft_cfg.get("target_modules", ["q_proj", "k_proj", "v_proj", "o_proj"])),
+            bias=str(peft_cfg.get("bias", "none")),
+            task_type=str(peft_cfg.get("task_type", "CAUSAL_LM")),
+        )
 
     # ---- Build rewards ----
     combined_reward = make_combined_reward(cfg, logger)
@@ -553,37 +606,7 @@ def main() -> None:
     # Debug model placement
     logger.info("model.device=%s dtype=%s", next(model.parameters()).device, next(model.parameters()).dtype)
 
-    from transformers.tokenization_utils_base import BatchEncoding
-    import traceback
-
-    _orig_to = BatchEncoding.to
-
-    def _to_debug(self, *args, **kwargs):
-        # The message you're seeing happens when the first positional arg is None,
-        # e.g. batch.to(None) OR when device=None is passed explicitly.
-        if (len(args) >= 1 and args[0] is None) or ("device" in kwargs and kwargs["device"] is None):
-            print("\n[DEBUG] BatchEncoding.to(None) called. Stack trace:")
-            traceback.print_stack(limit=25)
-            print()
-        return _orig_to(self, *args, **kwargs)
-
-    BatchEncoding.to = _to_debug
-
     # ---- Build trainer ----
-    peft_cfg = cfg.get("peft", {})
-    use_peft = bool(peft_cfg.get("enabled", True))
-
-    lora_cfg = None
-    if use_peft:
-        lora_cfg = LoraConfig(
-            r=int(peft_cfg.get("r", 8)),
-            lora_alpha=int(peft_cfg.get("lora_alpha", 16)),
-            lora_dropout=float(peft_cfg.get("lora_dropout", 0.05)),
-            target_modules=list(peft_cfg.get("target_modules", ["q_proj","k_proj","v_proj","o_proj"])),
-            bias=str(peft_cfg.get("bias", "none")),
-            task_type=str(peft_cfg.get("task_type", "CAUSAL_LM")),
-        )
-
     trainer = GRPOTrainer(
         model=model,
         args=grpo_args,
@@ -610,9 +633,12 @@ def main() -> None:
             logger.info("Running quick sanity generation...")
             test_prompt = "Write a short friendly reply in British English about making a cup of tea."
             chat = build_prompt(tokenizer, system_prompt, test_prompt, prefer_chat_template=True)
+
+            # Apply same truncation guard to sanity prompt
+            chat = truncate_prompt_to_max_tokens(tokenizer, chat, max_prompt_len)
+
             inputs = tokenizer(chat, return_tensors="pt").to(trainer.model.device)
 
-            # Use the same eos_ids list here too
             max_new = int(cfg.get("trainer", {}).get("max_completion_length", 64))
             temp = float(cfg.get("trainer", {}).get("temperature", 0.9))
             top_p = float(cfg.get("trainer", {}).get("top_p", 0.95))
@@ -620,7 +646,7 @@ def main() -> None:
             with torch.no_grad():
                 gen = trainer.model.generate(
                     **inputs,
-                    max_new_tokens=min(max_new, 128),
+                    max_new_tokens=max_new,
                     do_sample=True,
                     temperature=temp,
                     top_p=top_p,

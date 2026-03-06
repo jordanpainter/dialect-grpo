@@ -1,0 +1,96 @@
+{
+  "wandb": { "project": "test", "api_key": "" },
+
+  "model": {
+    "model_id": "srirag/sft-qwen-all",
+    "tokenizer_id": "Qwen/Qwen3-8B",
+
+    "load_in_4bit": false,
+    "bnb_4bit_compute_dtype": "bfloat16",
+    "bnb_4bit_quant_type": "nf4",
+    "bnb_4bit_use_double_quant": true
+  },
+
+  "peft": {
+    "enabled": false,
+    "r": 8,
+    "lora_alpha": 16,
+    "lora_dropout": 0.05,
+    "target_modules": [
+      "q_proj", "k_proj", "v_proj", "o_proj",
+      "gate_proj", "up_proj", "down_proj"
+    ],
+    "bias": "none",
+    "task_type": "CAUSAL_LM"
+  },
+
+  "data": {
+    "dataset_id": "jordanpainter/dialect-preferences",
+    "dataset_split": "train",
+    "seed": 42,
+    "test_size": 0.02,
+
+    "smoke_subset_train": 64,
+    "smoke_subset_eval": 32,
+
+    "system_prompt": "You are a helpful assistant."
+  },
+
+  "rewards": {
+    "weights": {
+      "dialect": 0.50,
+      "comet": 0.25,
+      "cosine": 0.25
+    },
+
+    "normalization": {
+      "method": "batch_zscore",
+      "clip_z": 5.0,
+      "eps": 1e-6,
+      "beta": 0.99,
+      "warmup_steps": 50
+    },
+
+    "comet_model_name": "Unbabel/wmt22-comet-da",
+    "comet_batch_size": 8,
+    "comet_force_cpu": false,
+
+    "sim_model_name": "sentence-transformers/all-MiniLM-L6-v2"
+  },
+
+  "trainer": {
+    "ddp_find_unused_parameters": false,
+    "length_safety_margin": 16,
+
+    "output_dir": "outputs/grpo_smoke_qwen_sft_all_nop"
+,
+    "report_to": "none",
+
+    "max_steps": 200,
+    "learning_rate": 5e-6,
+    "warmup_ratio": 0.05,
+    "weight_decay": 0.0,
+
+    "bf16": true,
+    "fp16": false,
+    "gradient_checkpointing": true,
+
+    "per_device_train_batch_size": 1,
+    "gradient_accumulation_steps": 4,
+
+    "logging_steps": 1,
+
+    "max_completion_length": 512,
+
+    "num_generations": 4,
+    "temperature": 0.7,
+    "top_p": 0.95,
+
+    "generation_kwargs": {
+      "do_sample": true
+    },
+
+    "beta": 0.0,
+    "scale_rewards": false
+  }
+}

@@ -50,12 +50,13 @@
 
   "comet_model_name": "Unbabel/wmt22-comet-da",
   "comet_batch_size": 8,
-  "comet_force_cpu": true,
+  "comet_force_cpu": false,
 
   "sim_model_name": "sentence-transformers/all-MiniLM-L6-v2"
   },
 
   "trainer": {
+  "length_safety_margin": 16,
   "output_dir": "outputs/grpo_smoke_gemma3_sft_dialect",
   "report_to": "none",
 
@@ -73,9 +74,9 @@
 
   "logging_steps": 1,
 
-  "max_completion_length": 192,
+  "max_completion_length": 512,
 
-  "num_generations": 2,
+  "num_generations": 4,
   "temperature": 0.7,
   "top_p": 0.95,
 
