@@ -1,5 +1,5 @@
 {
-  "wandb": { "project": "test", "api_key": "" },
+  "wandb": { "project": "dialect_grpo_qwen", "api_key": "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" },
 
   "model": {
     "model_id": "srirag/sft-qwen-all",
@@ -29,10 +29,6 @@
     "dataset_split": "train",
     "seed": 42,
     "test_size": 0.02,
-
-    "smoke_subset_train": 64,
-    "smoke_subset_eval": 32,
-
     "system_prompt": "You are a helpful assistant."
   },
 
@@ -44,7 +40,7 @@
     },
 
     "normalization": {
-      "method": "batch_zscore",
+      "method": "running_zscore",
       "clip_z": 5.0,
       "eps": 1e-6,
       "beta": 0.99,
@@ -52,7 +48,7 @@
     },
 
     "comet_model_name": "Unbabel/wmt22-comet-da",
-    "comet_batch_size": 8,
+    "comet_batch_size": 2,
     "comet_force_cpu": false,
 
     "sim_model_name": "sentence-transformers/all-MiniLM-L6-v2"
@@ -62,11 +58,10 @@
     "ddp_find_unused_parameters": false,
     "length_safety_margin": 16,
 
-    "output_dir": "outputs/grpo_smoke_qwen_sft_all_nop"
-,
-    "report_to": "none",
+    "output_dir": "/mnt/fast/nobackup/scratch4weeks/jp01166/runs/grpo_qwen_sft_all",
+    "report_to": "wandb",
 
-    "max_steps": 200,
+    "max_steps": 5000,
     "learning_rate": 5e-6,
     "warmup_ratio": 0.05,
     "weight_decay": 0.0,
