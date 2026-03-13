@@ -194,6 +194,7 @@ def add_base_outputs(
     prompt_max_len: Optional[int],
     batch_size: int,
     output_col: str,
+    use_chat_template: bool,
     logger: logging.Logger,
 ) -> Dataset:
     eos_ids = infer_eos_ids(tokenizer)
@@ -221,14 +222,24 @@ def add_base_outputs(
     )
 
     for step, batch in enumerate(loader, start=1):
-        built_prompts = [
-            truncate_prompt_to_max_tokens(
-                tokenizer,
-                build_prompt(tokenizer, system_prompt, p, prefer_chat_template=True),
-                prompt_max_len,
-            )
-            for p in batch
-        ]
+        if use_chat_template:
+            built_prompts = [
+                truncate_prompt_to_max_tokens(
+                    tokenizer,
+                    build_prompt(tokenizer, system_prompt, p, prefer_chat_template=True),
+                    prompt_max_len,
+                )
+                for p in batch
+            ]
+        else:
+            built_prompts = [
+                truncate_prompt_to_max_tokens(
+                    tokenizer,
+                    p,
+                    prompt_max_len,
+                )
+                for p in batch
+            ]
 
         inputs = tokenizer(
             built_prompts,
@@ -249,6 +260,7 @@ def add_base_outputs(
                 do_sample=False,
                 use_cache=True,
                 return_dict_in_generate=False,
+                repetition_penalty=1.05,
                 pad_token_id=tokenizer.pad_token_id,
                 eos_token_id=eos_ids,
         )
@@ -350,6 +362,7 @@ def main() -> None:
     parser.add_argument("--dialect_output_col", default="base_dialect_density")
     parser.add_argument("--push_repo_id", default=None)
     parser.add_argument("--private", action="store_true")
+    parser.add_argument("--use_chat_template", action="store_true")
     args = parser.parse_args()
 
     logger = setup_logging()
@@ -387,6 +400,7 @@ def main() -> None:
         prompt_max_len=args.prompt_max_len,
         batch_size=args.batch_size,
         output_col=args.output_col,
+        use_chat_template=args.use_chat_template,
         logger=logger,
     )
 
