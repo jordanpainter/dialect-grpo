@@ -159,7 +159,8 @@ def load_dataset_snapshot(dataset_id: str, split: str, logger: logging.Logger) -
 
 def load_generation_model(model_id: str, tokenizer_id: Optional[str], bf16: bool, logger: logging.Logger):
     tok_id = tokenizer_id or model_id
-    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-8B", use_fast=True)
+    tokenizer = AutoTokenizer.from_pretrained(tok_id, use_fast=True)
+    logger.info("Loading tokenizer: %s", tok_id)
     tokenizer.padding_side = "left"
     tokenizer.truncation_side = "left"
     ensure_pad_token(tokenizer)
@@ -172,6 +173,7 @@ def load_generation_model(model_id: str, tokenizer_id: Optional[str], bf16: bool
     logger.info("Loading generation model: %s", model_id)
     model = AutoModelForCausalLM.from_pretrained(model_id, **model_kwargs)
     model.eval()
+    model.config.use_cache = True
 
     model.config.pad_token_id = tokenizer.pad_token_id
     if tokenizer.eos_token_id is not None:
@@ -237,14 +239,19 @@ def add_base_outputs(
         )
         inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
+        if step == 1:
+            logger.info("Running first generation batch...")
+
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,
                 max_new_tokens=max_new_tokens,
                 do_sample=False,
+                use_cache=True,
+                return_dict_in_generate=False,
                 pad_token_id=tokenizer.pad_token_id,
                 eos_token_id=eos_ids,
-            )
+        )
 
         prompt_len = inputs["input_ids"].shape[1]
         new_tokens = outputs[:, prompt_len:]
