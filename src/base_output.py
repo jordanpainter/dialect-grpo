@@ -179,6 +179,8 @@ def load_generation_model(model_id: str, tokenizer_id: Optional[str], bf16: bool
 
     return model, tokenizer
 
+from torch.utils.data import DataLoader
+
 
 def add_base_outputs(
     ds: Dataset,
@@ -191,23 +193,30 @@ def add_base_outputs(
     output_col: str,
     logger: logging.Logger,
 ) -> Dataset:
+
     eos_ids = infer_eos_ids(tokenizer)
     logger.info("Using eos ids for generation: %s", eos_ids)
 
     if prompt_max_len is None:
-        model_max_len = resolve_model_max_length(tokenizer, model, fallback=2048)
-        prompt_max_len = 2048
+        prompt_max_len = 1024
+
     logger.info("Prompt max length set to %d tokens", prompt_max_len)
 
-    def map_fn(batch: Dict[str, list[str]]) -> Dict[str, list[str]]:
-        raw_prompts = batch["prompt"]
+    prompts = ds["prompt"]
+
+    results = []
+
+    loader = DataLoader(prompts, batch_size=batch_size)
+
+    for batch in loader:
+
         built_prompts = [
             truncate_prompt_to_max_tokens(
                 tokenizer,
                 build_prompt(tokenizer, system_prompt, p, prefer_chat_template=True),
                 prompt_max_len,
             )
-            for p in raw_prompts
+            for p in batch
         ]
 
         inputs = tokenizer(
@@ -216,8 +225,7 @@ def add_base_outputs(
             truncation=True,
             max_length=prompt_max_len,
             return_tensors="pt",
-        )
-        inputs = {k: v.to(model.device) for k, v in inputs.items()}
+        ).to(model.device)
 
         with torch.no_grad():
             outputs = model.generate(
@@ -229,13 +237,20 @@ def add_base_outputs(
             )
 
         prompt_len = inputs["input_ids"].shape[1]
-        new_tokens = outputs[:, prompt_len:]
-        decoded = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
-        decoded = [text.strip() for text in decoded]
-        return {output_col: decoded}
 
-    logger.info("Generating base outputs into column '%s' ...", output_col)
-    return ds.map(map_fn, batched=True, batch_size=batch_size, desc=f"Generating {output_col}")
+        new_tokens = outputs[:, prompt_len:]
+
+        decoded = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
+
+        decoded = [t.strip() for t in decoded]
+
+        results.extend(decoded)
+
+    logger.info("Generated %d base outputs", len(results))
+
+    ds = ds.add_column(output_col, results)
+
+    return ds
 
 
 def add_base_dialect_density(
