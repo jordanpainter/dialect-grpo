@@ -180,6 +180,7 @@ def load_generation_model(model_id: str, tokenizer_id: Optional[str], bf16: bool
     return model, tokenizer
 
 from torch.utils.data import DataLoader
+import time
 
 
 def add_base_outputs(
@@ -193,7 +194,6 @@ def add_base_outputs(
     output_col: str,
     logger: logging.Logger,
 ) -> Dataset:
-
     eos_ids = infer_eos_ids(tokenizer)
     logger.info("Using eos ids for generation: %s", eos_ids)
 
@@ -203,13 +203,22 @@ def add_base_outputs(
     logger.info("Prompt max length set to %d tokens", prompt_max_len)
 
     prompts = ds["prompt"]
-
+    total = len(prompts)
     results = []
 
-    loader = DataLoader(prompts, batch_size=batch_size)
+    loader = DataLoader(prompts, batch_size=batch_size, shuffle=False)
 
-    for batch in loader:
+    start_time = time.time()
+    last_log_time = start_time
 
+    logger.info(
+        "Starting base generation for %d prompts with batch_size=%d, max_new_tokens=%d",
+        total,
+        batch_size,
+        max_new_tokens,
+    )
+
+    for step, batch in enumerate(loader, start=1):
         built_prompts = [
             truncate_prompt_to_max_tokens(
                 tokenizer,
@@ -225,7 +234,8 @@ def add_base_outputs(
             truncation=True,
             max_length=prompt_max_len,
             return_tensors="pt",
-        ).to(model.device)
+        )
+        inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
         with torch.no_grad():
             outputs = model.generate(
@@ -237,20 +247,40 @@ def add_base_outputs(
             )
 
         prompt_len = inputs["input_ids"].shape[1]
-
         new_tokens = outputs[:, prompt_len:]
-
         decoded = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
-
-        decoded = [t.strip() for t in decoded]
+        decoded = [text.strip() for text in decoded]
 
         results.extend(decoded)
 
-    logger.info("Generated %d base outputs", len(results))
+        processed = len(results)
 
-    ds = ds.add_column(output_col, results)
+        if step == 1 or step % 10 == 0 or processed == total:
+            now = time.time()
+            elapsed = now - start_time
+            since_last = now - last_log_time
+            ex_per_sec = processed / elapsed if elapsed > 0 else 0.0
+            pct = 100.0 * processed / total
 
-    return ds
+            logger.info(
+                "Progress: %d/%d examples (%.2f%%) | step=%d | elapsed=%.1fs | rate=%.2f ex/s | last_batch_time=%.1fs",
+                processed,
+                total,
+                pct,
+                step,
+                elapsed,
+                ex_per_sec,
+                since_last,
+            )
+
+            if decoded:
+                preview = decoded[0].replace("\n", " ")[:160]
+                logger.info("Sample output preview: %s", preview)
+
+            last_log_time = now
+
+    logger.info("Generated %d base outputs total", len(results))
+    return ds.add_column(output_col, results)
 
 
 def add_base_dialect_density(
