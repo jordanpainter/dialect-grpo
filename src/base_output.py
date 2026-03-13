@@ -196,7 +196,7 @@ def add_base_outputs(
 
     if prompt_max_len is None:
         model_max_len = resolve_model_max_length(tokenizer, model, fallback=2048)
-        prompt_max_len = max(2048)
+        prompt_max_len = 2048
     logger.info("Prompt max length set to %d tokens", prompt_max_len)
 
     def map_fn(batch: Dict[str, list[str]]) -> Dict[str, list[str]]:
